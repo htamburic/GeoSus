@@ -1,0 +1,428 @@
+﻿@model Projekt.ViewModels.GeometriesViewModel
+
+@{
+    ViewBag.Title = "Home Page";
+}
+
+@Scripts.Render("~/bundles/jquery")
+@Scripts.Render("~/bundles/bootstrap")
+<link href="~/Content/Site.css" rel="stylesheet" />
+
+<h3>Calculating shortest path between two geometries: ROADS and OUR WKT</h3>
+<div class="container">
+    <div class="row">
+        <div class="col" >
+            <button class="btn-info" id="clear" onclick="initMap()">Clear</button>
+            <button class="btn btn-success" type="button" id="result">Show on map</button>
+            <div id="map" style="height: 400px; width: 100%;"></div>
+        </div>
+        <br/>
+        <div  class="col" >
+@using (Html.BeginForm("Index", "Home"))
+{
+    <div id="building" class="form-group">
+        @Html.LabelFor(m => m.UserGeometries)
+        @Html.DropDownListFor(m => m.SelectedBuildingId, new SelectList(Model.Buildings, "Id", "GeometryAsText"), "Pick a building", new { @class = "form-control" })
+    </div>
+
+    <button class="btn btn-success" id="submit">Calculate</button>
+    <br/>
+
+}
+Napomena: Unos u bazu ide u formatu (y,x)
+@using (Html.BeginForm("SaveWKT", "Home"))
+{
+    <div id="usergeom" class="form-group">
+        Import @Html.LabelFor(m => m.UserGeometries)
+        @{List<SelectListItem>
+                              listItems = new List<SelectListItem>
+                                  ();
+            listItems.Add(new SelectListItem
+            {
+                Text = "POINT",
+                Value = "POINT"
+            });
+            listItems.Add(new SelectListItem
+            {
+                Text = "LINESTRING",
+                Value = "LINESTRING",
+                Selected = true
+            });
+            listItems.Add(new SelectListItem
+            {
+                Text = "POLYGON",
+                Value = "POLYGON"
+            });
+        }
+
+        @Html.DropDownList("GeometryType", listItems, new { @class = "form-control" })
+        <br/>
+        @Html.TextArea("enter", @Model.enter, new { rows = 3, cols = 1000 })
+        <p class="alert-danger">
+            @Html.ViewBag.fail
+        </p>
+        <button class="btn btn-success" id="submit">Add geometry</button>
+        <br />
+        <br />
+
+    </div>
+}
+ </div>
+ </div>
+ 
+
+<table id="Information" class="table table-bordered">
+    <thead>
+        <tr>
+            <th>Distance</th>
+            <th>Length of motorway</th>
+            <th>Start Point (X,Y)</th>
+            <th>End Point (X,Y)</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+
+            <th id="distance">@Model.Distance</th>
+            <th id="length">@Model.Length</th>
+            <th hidden id="starty">@Model.startY</th>
+            <th hidden id="startx">@Model.startX</th>
+            <th hidden id="endy">@Model.endY</th>
+            <th hidden id="endx">@Model.endX</th>
+            <th hidden id="roadGeom">@Model.road</th>
+            <th hidden id="myWkt">@Model.myWkt</th>
+            <th>(@Model.startY, @Model.startX)</th>
+            <th>(@Model.endY, @Model.endX)</th>
+
+        </tr>
+    </tbody>
+</table>
+
+</div>
+
+
+@section Scripts
+{
+    <script>
+
+    </script>
+    <script>
+
+        var map;
+
+        //scroll save
+        $(document).scroll(function () {
+            localStorage['page'] = document.URL;
+            localStorage['scrollTop'] = $(document).scrollTop();
+        });
+
+
+        $(document).ready(function change() {
+            if (localStorage['page'] == document.URL) {
+                $(document).scrollTop(localStorage['scrollTop']);
+            }
+            $("#GeometryType").bind("change", function () {
+                if ($("#GeometryType option:selected").text() == "POINT") {
+                    document.getElementById("enter").innerHTML = $("#GeometryType option:selected").text() + "()";
+                } else if ($("#GeometryType option:selected").text() == "LINESTRING")
+                    document.getElementById("enter").innerHTML = "LINESTRING ()";
+                else
+                    document.getElementById("enter").innerHTML = $("#GeometryType option:selected").text() + "(())";
+            });
+
+            $("#result").bind("click", function () {
+                //alert(document.getElementById("starty").innerHTML);
+
+
+                var startX = document.getElementById("startx").innerHTML;
+                var startY = document.getElementById("starty").innerHTML;
+                var endX = document.getElementById("endx").innerHTML;
+                var endY = document.getElementById("endy").innerHTML;
+                var length = document.getElementById("length").innerHTML;
+                var distance = document.getElementById("distance").innerHTML;
+                var color = "";
+
+                var resultPlanCoordinates = [
+                    { lat: Number(startY), lng: Number(startX) },
+                    { lat: Number(endY), lng: Number(endX) }
+                ];
+
+                if (distance < length) {
+                    color = '#008000'; //green
+                }
+                // ako je udaljenost veća od duljine najbliže prometnice, a manje od dvije duljine prometnice
+                else if (distance > length && distance < 2 * length) {
+                    color = '#FFFF00'; //yellow
+                }
+                else {
+                    color = '#FF0000'; //red
+                }
+                var roadPath = new google.maps.Polyline({
+                    path: resultPlanCoordinates,
+                    geodesic: true,
+                    strokeColor: color,
+                    strokeOpacity: 1.0,
+                    strokeWeight: 2
+                    });
+                    
+                roadPath.setMap(map);
+
+                //hendlanje ceste
+                //its a linestring LINESTRING(45.2 15.2, 45.1 14.1...)
+
+                var str = document.getElementById("roadGeom").innerHTML;
+                console.log("tu1"+ str);
+                var arr = str.split("(");
+                arr = arr[1].split(")");
+                var coordinates = [];
+                var coordinatesHelp = arr[0].split(",");
+                var len = coordinatesHelp.length;
+                var latitude, longitude;
+                var j;
+                var roadPlanCoordinates2 = [];
+                var coordinateObject = new Object();
+
+                for (var i = 0; i < len; i++) {
+                    j = coordinatesHelp[i].split(" ");
+                    longitude = Number(j[0]);
+                    latitude = Number(j[1]);
+                    console.log("tu2" + longitude + latitude);
+                    coordinateObject = { lat: latitude, lng: longitude };
+                    roadPlanCoordinates2.push(coordinateObject);
+                }
+
+                var roadPathRoad = new google.maps.Polyline({
+                    path: roadPlanCoordinates2,
+                    //geodesic: true,
+                    strokeColor: '#FF0000',
+                    strokeOpacity: 1.0,
+                    strokeWeight: 2
+                });
+                console.log("tu3" + roadPlanCoordinates2);
+                google.maps.event.trigger(map, 'resize');
+                roadPathRoad.setMap(map);
+                google.maps.event.trigger(map, 'resize');
+                console.log("tu4" );
+
+                ///hendlanje my wkt ponovo
+
+                var str = document.getElementById("myWkt").innerHTML;
+                var arr = str.split("(");
+                if (arr[0] === "POLYGON") {
+                    //arr = arr[1].split("(");
+
+                    arr = arr[2].split("))");
+                    var coordinates = [];
+                    var coordinatesHelp = arr[0].split(",");
+                    var len = coordinatesHelp.length;
+                    var latitude, longitude;
+                    var j;
+                    var roadPlanCoordinates2 = [];
+                    var coordinateObject = new Object();
+
+                    for (var i = 0; i < len; i++) {
+                        j = coordinatesHelp[i].split(" ");
+                        longitude = Number(j[0]);
+                        latitude = Number(j[1]);
+                        coordinateObject = { lat: latitude, lng: longitude };
+                        roadPlanCoordinates2.push(coordinateObject);
+                    }
+                    var marker = new google.maps.Marker({
+                        position: roadPlanCoordinates2[0],
+                        map: map,
+                        title: 'Hello World!'
+                    });
+                    // Construct the polygon.
+                    var bermudaTriangle = new google.maps.Polygon({
+                        paths: roadPlanCoordinates2,
+                        strokeColor: '#0000CD',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 2,
+                        fillColor: '#0000CD',
+                        fillOpacity: 0.35
+                    });
+                    bermudaTriangle.setMap(map);
+                }
+                else if (arr[0] === "LINESTRING") {
+                    arr = arr[1].split(")");
+                    var coordinates = [];
+                    var coordinatesHelp = arr[0].split(",");
+                    var len = coordinatesHelp.length;
+                    var latitude, longitude;
+                    var j;
+                    var roadPlanCoordinates2 = [];
+                    var coordinateObject = new Object();
+
+                    for (var i = 0; i < len; i++) {
+                        j = coordinatesHelp[i].split(" ");
+                        longitude = Number(j[0]);
+                        latitude = Number(j[1]);
+                        coordinateObject = { lat: latitude, lng: longitude };
+                        roadPlanCoordinates2.push(coordinateObject);
+                    }
+                    var marker = new google.maps.Marker({
+                        position: roadPlanCoordinates2[0],
+                        map: map,
+                        title: 'Hello World!'
+                    });
+
+                    var roadPath3 = new google.maps.Polyline({
+                        path: roadPlanCoordinates2,
+                        geodesic: true,
+                        strokeColor: '#0000CD',
+                        strokeOpacity: 1.0,
+                        strokeWeight: 2
+                    });
+
+                    roadPath3.setMap(map);
+                }
+                else {
+                    //its a point :)
+                    arr = arr[1].split(")");
+                    var latitude, longitude;
+                    var j;
+                    var coordinates = [];
+                    var coordinateObject = new Object();
+                    j = arr[0].split(" ");
+                    longitude = Number(j[0]);
+                    latitude = Number(j[1]);
+                    coordinateObject = { lat: latitude, lng: longitude };
+                    coordinates.push(coordinateObject);
+
+                    var marker = new google.maps.Marker({
+                        position: coordinates[0],
+                        map: map,
+                        title: 'Hello World!'
+                    });
+                }
+            });
+
+            $("#SelectedBuildingId").bind("change", function () {
+               //var str = "POLYGON((16.0275526 45.8045255,16.0278409 45.8045281,16.0278363 45.8045939,16.0278983 45.804596,16.0278975 45.804656,16.027837 45.8046554,16.0278365 45.8046798,16.0275384 45.8046771,16.0275388 45.8046552,16.0274229 45.8046541,16.027425 45.8045404,16.0275523 45.8045415,16.0275526 45.8045255))";
+                initMap();
+                var str = $("#SelectedBuildingId option:selected").text();
+                var arr = str.split("(");
+                if (arr[0] === "POLYGON") {
+                    //arr = arr[1].split("(");
+
+                    arr = arr[2].split("))");
+                    var coordinates = [];
+                    var coordinatesHelp = arr[0].split(",");
+                    var len = coordinatesHelp.length;
+                    var latitude, longitude;
+                    var j;
+                    var roadPlanCoordinates2 = [];
+                    var coordinateObject = new Object();
+
+                    for (var i = 0; i < len; i++) {
+                        j = coordinatesHelp[i].split(" ");
+                        longitude = Number(j[0]);
+                        latitude = Number(j[1]);
+                        coordinateObject = { lat: latitude, lng: longitude };
+                        roadPlanCoordinates2.push(coordinateObject);
+                    }
+                    var marker = new google.maps.Marker({
+                        position: roadPlanCoordinates2[0],
+                        map: map,
+                        title: 'Hello World!'
+                    });
+                    // Construct the polygon.
+                    var bermudaTriangle = new google.maps.Polygon({
+                        paths: roadPlanCoordinates2,
+                        strokeColor: '#0000CD',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 2,
+                        fillColor: '#0000CD',
+                        fillOpacity: 0.35
+                    });
+                    bermudaTriangle.setMap(map);
+                }
+                else if (arr[0] === "LINESTRING") {
+                    arr = arr[1].split(")");
+                    var coordinates = [];
+                    var coordinatesHelp = arr[0].split(",");
+                    var len = coordinatesHelp.length;
+                    var latitude, longitude;
+                    var j;
+                    var roadPlanCoordinates2 = [];
+                    var coordinateObject = new Object();
+
+                    for (var i = 0; i < len; i++) {
+                        j = coordinatesHelp[i].split(" ");
+                        longitude = Number(j[0]);
+                        latitude = Number(j[1]);
+                        coordinateObject = { lat: latitude, lng: longitude };
+                        roadPlanCoordinates2.push(coordinateObject);
+                    }
+                    var marker = new google.maps.Marker({
+                        position: roadPlanCoordinates2[0],
+                        map: map,
+                        title: 'Hello World!'
+                    });
+
+                    var roadPath = new google.maps.Polyline({
+                        path: roadPlanCoordinates2,
+                        geodesic: true,
+                        strokeColor: '#0000CD',
+                        strokeOpacity: 1.0,
+                        strokeWeight: 2
+                    });
+
+                    roadPath.setMap(map);
+                }
+                else {
+                    //its a point :)
+                    arr = arr[1].split(")");
+                    var latitude, longitude;
+                    var j;
+                    var coordinates = [];
+                    var coordinateObject = new Object();
+                    j = arr[0].split(" ");
+                    longitude = Number(j[0]);
+                    latitude = Number(j[1]);
+                    coordinateObject = { lat: latitude, lng: longitude };
+                    coordinates.push(coordinateObject);
+
+                    var marker = new google.maps.Marker({
+                        position: coordinates[0],
+                        map: map,
+                        title: 'Hello World!'
+                    });
+                }
+
+                google.maps.event.trigger(map, 'resize');
+                
+
+        
+
+               
+                
+
+            });
+
+        });
+
+        function initMap() {
+
+            //Zagreb centar pocetne koordinate
+            var centerX = 45.8150;
+            var centerY = 15.9819;
+
+
+            var elevator;
+            var myOptions = {
+                zoom: 9,
+                center: new google.maps.LatLng(centerX, centerY)
+            };
+
+            map = new google.maps.Map($('#map')[0], myOptions);
+            google.maps.event.trigger(map, 'resize');
+        }
+
+      
+     
+    </script>
+
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCrnEiFK6qguzz9-VYejAqsZ7QX8LBgYyM&callback=initMap">
+    </script>
+}
